@@ -64,6 +64,8 @@ import {
   getProduct,
   updateProduct,
   upsertProduct,
+  uploadProductMedia,
+  uploadCategoryMedia,
   CreateProductInputSchema,
   CreateConfigurableProductInputSchema,
   BulkCreateProductsInputSchema,
@@ -71,6 +73,8 @@ import {
   GetProductInputSchema,
   UpdateProductInputSchema,
   UpsertProductInputSchema,
+  UploadProductMediaInputSchema,
+  UploadCategoryMediaInputSchema,
 } from './tools/products.js';
 
 // ============================================================================
@@ -182,7 +186,27 @@ class UnoPimMcpServer {
         },
         {
           name: 'unopim_create_attribute_options',
-          description: 'Create options for select or multiselect attributes',
+          description: `Create options for select or multiselect attributes.
+
+🔴 CRITICAL: Option codes MUST be lowercase with underscores only!
+Pattern: /^[a-z0-9_]+$/
+
+EXAMPLE - Creating color options:
+{
+  "attribute_code": "color",
+  "options": [
+    { "code": "black", "labels": { "da_DK": "Sort", "en_US": "Black" } },
+    { "code": "white", "labels": { "da_DK": "Hvid", "en_US": "White" } },
+    { "code": "navy_blue", "labels": { "da_DK": "Marineblå", "en_US": "Navy Blue" } }
+  ]
+}
+
+⚠️ When you later create variants, use the EXACT same code:
+✅ CORRECT: { "color": "black" }
+❌ WRONG:   { "color": "Black" }  ← Uppercase = WILL FAIL
+
+VALID: lowercase letters, numbers, underscores (black, size_xl, color_01)
+INVALID: uppercase, spaces, special chars (Black, Size XL, Color-01)`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -192,7 +216,7 @@ class UnoPimMcpServer {
                 items: {
                   type: 'object',
                   properties: {
-                    code: { type: 'string', description: 'Option code (snake_case)' },
+                    code: { type: 'string', description: 'Option code - MUST be lowercase with underscores only (e.g., "black", "large", "navy_blue")' },
                     sort_order: { type: 'number' },
                     labels: { type: 'object', description: 'Labels for each locale' },
                   },
@@ -205,7 +229,24 @@ class UnoPimMcpServer {
         },
         {
           name: 'unopim_get_attribute_options',
-          description: 'Get all options for a select/multiselect attribute. Use this to check which options already exist.',
+          description: `Get all options for a select/multiselect attribute.
+
+🔴 IMPORTANT: Use this tool to verify EXACT option codes before creating variants!
+Option codes are always lowercase - you must use them exactly as returned.
+
+USE CASE: Before creating variants, call this to get the exact option codes:
+Tool: unopim_get_attribute_options({ attribute_code: "color" })
+
+Response example:
+{
+  "options": [
+    { "code": "black", "labels": { "da_DK": "Sort" } },
+    { "code": "white", "labels": { "da_DK": "Hvid" } },
+    { "code": "navy_blue", "labels": { "da_DK": "Marineblå" } }
+  ]
+}
+
+Then use the exact code (e.g., "black", "navy_blue") when creating variants!`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -233,7 +274,17 @@ class UnoPimMcpServer {
         // Family Tools
         {
           name: 'unopim_create_family',
-          description: 'Create a product family with associated attribute groups and attributes',
+          description: `Create a product family with associated attribute groups and attributes.
+
+⚠️ MANDATORY PRE-REQUISITES:
+1. Call unopim_get_schema() FIRST to check what exists
+2. ALL attributes in custom_attributes MUST exist (use unopim_create_attribute first!)
+3. For select/multiselect attributes, options MUST exist (use unopim_create_attribute_options)
+4. ONLY THEN create the family
+
+❌ WILL FAIL IF: Any attribute code in custom_attributes does not exist
+
+✅ CORRECT ORDER: Attributes → Attribute Options → Family`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -335,7 +386,17 @@ class UnoPimMcpServer {
         // Product Tools
         {
           name: 'unopim_create_product',
-          description: 'Create a simple product',
+          description: `Create a simple product.
+
+⚠️ MANDATORY PRE-REQUISITES (in order):
+1. unopim_get_schema() - Check what exists
+2. unopim_create_attribute() - Create any missing attributes
+3. unopim_create_attribute_options() - For select types
+4. unopim_create_family() - If family doesn't exist
+5. unopim_create_category() - If categories don't exist
+6. ONLY THEN create the product
+
+❌ WILL FAIL IF: Family doesn't exist, required attributes missing, or category codes don't exist`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -359,7 +420,24 @@ class UnoPimMcpServer {
         },
         {
           name: 'unopim_create_configurable_product',
-          description: 'Create a configurable product with variants',
+          description: `Create a configurable product (PARENT only - add variants separately with unopim_add_variant).
+
+🔴 CRITICAL: CREATE PARENT FIRST, THEN VARIANTS!
+This creates ONLY the parent. Use unopim_add_variant for EACH variant AFTER.
+
+⚠️ MANDATORY PRE-REQUISITES:
+1. unopim_get_schema() - Check what exists
+2. Super_attributes MUST be select type with is_configurable=true
+3. Super_attributes MUST have options defined
+4. Family MUST exist with all attributes
+5. Create parent with this tool
+6. THEN add variants one by one with unopim_add_variant
+
+❌ WILL FAIL IF: Variants created before parent, or super_attributes not properly configured
+
+✅ CORRECT ORDER:
+1. unopim_create_configurable_product() ← Parent
+2. unopim_add_variant() × N ← Each variant`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -380,6 +458,44 @@ class UnoPimMcpServer {
               },
             },
             required: ['sku', 'family', 'super_attributes', 'values'],
+          },
+        },
+        {
+          name: 'unopim_add_variant',
+          description: `Add a variant (child product) to an existing configurable product.
+
+🔴 CRITICAL: PARENT MUST EXIST FIRST!
+The parent configurable product MUST be created with unopim_create_configurable_product BEFORE calling this.
+
+🔴 CRITICAL: OPTION VALUES MUST BE LOWERCASE!
+The variant_attributes values MUST match the option codes EXACTLY as created.
+Option codes are always lowercase with underscores only.
+
+If you created option: { "code": "black", "labels": {...} }
+✅ CORRECT: variant_attributes: { "color": "black" }
+❌ WRONG:   variant_attributes: { "color": "Black" }  ← Uppercase WILL FAIL!
+
+TIP: Use unopim_get_attribute_options() to verify exact option codes before creating variants.
+
+❌ WILL FAIL IF:
+- Parent product does not exist
+- Parent is not a configurable product
+- variant_attributes don't match parent's super_attributes
+- Option values not lowercase or contain invalid characters
+
+✅ CORRECT ORDER:
+1. FIRST: unopim_create_configurable_product() ← Parent
+2. THEN: unopim_add_variant() ← This tool, for each variant`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              parent: { type: 'string', description: 'SKU of the parent configurable product (must exist!)' },
+              family: { type: 'string', description: 'Family code (same as parent)' },
+              sku: { type: 'string', description: 'Unique SKU for the variant' },
+              values: { type: 'object', description: 'Product values' },
+              variant_attributes: { type: 'object', description: 'Super attribute values, e.g., { "color": "Red", "size": "M" }' },
+            },
+            required: ['parent', 'family', 'sku', 'values', 'variant_attributes'],
           },
         },
         {
@@ -453,6 +569,79 @@ class UnoPimMcpServer {
               values: { type: 'object', description: 'The product values' },
             },
             required: ['sku', 'family', 'values'],
+          },
+        },
+        {
+          name: 'unopim_upload_product_media',
+          description: `Upload an image or file to a product attribute AND automatically link it to the product.
+
+This is a COMPLETE workflow that:
+1. Uploads the file to UnoPim storage
+2. Fetches attribute metadata to determine correct scope (common/locale_specific/channel_specific/channel_locale_specific)
+3. Updates the product to reference the uploaded file in the correct value structure
+4. Returns success with the filePath
+
+After calling this tool, the image will be IMMEDIATELY VISIBLE on the product in UnoPim UI.
+
+EXAMPLE - Upload from URL:
+{
+  "sku": "PROD001",
+  "attribute": "image",
+  "file_url": "https://example.com/image.jpg"
+}
+
+EXAMPLE - Upload from base64:
+{
+  "sku": "PROD001",
+  "attribute": "image",
+  "file_base64": "iVBORw0KGgo...",
+  "filename": "product-image.jpg"
+}
+
+NOTES:
+- The product must exist before uploading media
+- The attribute must be an image/file type attribute in the product's family
+- Provide EITHER file_url OR file_base64, not both
+- The tool automatically determines the correct value scope based on attribute settings
+- No need to manually update product values after upload - it's done automatically`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The product SKU to attach media to' },
+              attribute: { type: 'string', description: 'The attribute code (e.g., "image")' },
+              file_url: { type: 'string', description: 'URL to fetch the file from' },
+              file_base64: { type: 'string', description: 'Base64-encoded file content' },
+              filename: { type: 'string', description: 'Filename (required for base64, optional for URL)' },
+            },
+            required: ['sku', 'attribute'],
+          },
+        },
+        {
+          name: 'unopim_upload_category_media',
+          description: `Upload an image or file to a category field AND automatically link it.
+
+Uploads media file to UnoPim storage and updates the category to reference it.
+
+EXAMPLE:
+{
+  "code": "electronics",
+  "category_field": "image",
+  "file_url": "https://example.com/category-image.jpg"
+}
+
+NOTES:
+- The category must exist before uploading media
+- Provide EITHER file_url OR file_base64, not both`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'The category code' },
+              category_field: { type: 'string', description: 'The category field to attach media to' },
+              file_url: { type: 'string', description: 'URL to fetch the file from' },
+              file_base64: { type: 'string', description: 'Base64-encoded file content' },
+              filename: { type: 'string', description: 'Filename (required for base64, optional for URL)' },
+            },
+            required: ['code', 'category_field'],
           },
         },
       ],
@@ -548,6 +737,47 @@ class UnoPimMcpServer {
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
 
+          case 'unopim_add_variant': {
+            // Add variant to existing configurable product
+            const { parent, family, sku, values, variant_attributes } = args as {
+              parent: string;
+              family: string;
+              sku: string;
+              values: Record<string, unknown>;
+              variant_attributes: Record<string, string>;
+            };
+
+            // Ensure SKU is in values.common
+            const variantValues = { ...values };
+            if (!variantValues.common) {
+              variantValues.common = {};
+            }
+            (variantValues.common as Record<string, unknown>)['sku'] = sku;
+
+            const variantData = {
+              parent: parent,
+              family: family,
+              additional: null,
+              values: variantValues,
+              variant: {
+                attributes: variant_attributes
+              }
+            };
+
+            const response = await this.client.post<{ success?: boolean; message?: string; data?: unknown }>(
+              '/api/v1/rest/products',
+              variantData
+            );
+
+            return { content: [{ type: 'text', text: JSON.stringify({
+              success: true,
+              message: response.message || 'Variant created successfully',
+              sku: sku,
+              parent: parent,
+              variant_attributes: variant_attributes
+            }, null, 2) }] };
+          }
+
           case 'unopim_bulk_create_products': {
             const input = BulkCreateProductsInputSchema.parse(args);
             const result = await bulkCreateProducts(this.client, input);
@@ -575,6 +805,19 @@ class UnoPimMcpServer {
           case 'unopim_upsert_product': {
             const input = UpsertProductInputSchema.parse(args);
             const result = await upsertProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          // Media Upload Tools
+          case 'unopim_upload_product_media': {
+            const input = UploadProductMediaInputSchema.parse(args);
+            const result = await uploadProductMedia(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'unopim_upload_category_media': {
+            const input = UploadCategoryMediaInputSchema.parse(args);
+            const result = await uploadCategoryMedia(this.client, input);
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
 

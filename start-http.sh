@@ -1,16 +1,30 @@
 #!/bin/bash
-# Start UnoPim MCP Server in HTTP mode for ngrok access
+# Start UnoPim MCP Server in HTTP mode
+# This script loads environment variables and starts the server
 
-echo "Starting UnoPim MCP Server (HTTP Mode)..."
+# Load environment variables from .env file
+if [ -f .env ]; then
+  echo "Loading environment from .env..."
+  export $(cat .env | grep -v '^#' | xargs)
+else
+  echo "ERROR: .env file not found!"
+  echo "Please create a .env file with your UnoPim credentials."
+  exit 1
+fi
+
+# Check if dist folder exists
+if [ ! -d "dist" ]; then
+  echo "ERROR: dist folder not found. Building project..."
+  npm run build
+fi
+
+# Start the HTTP server
+echo "Starting UnoPim MCP HTTP server on port 3000..."
+echo "Base URL: $UNOPIM_BASE_URL"
+echo "Locale: $UNOPIM_DEFAULT_LOCALE"
+echo ""
+echo "Ready for ngrok connection!"
+echo "Run in another terminal: ngrok http 3000"
 echo ""
 
-# Set environment variables and run node
-UNOPIM_BASE_URL="http://REDACTED-IP:8000" \
-UNOPIM_CLIENT_ID="REDACTED-CLIENT-ID" \
-UNOPIM_CLIENT_SECRET="REDACTED-SECRET" \
-UNOPIM_USERNAME="REDACTED-EMAIL" \
-UNOPIM_PASSWORD="REDACTED-PASSWORD" \
-UNOPIM_DEFAULT_LOCALE="da_DK" \
-UNOPIM_DEFAULT_CURRENCY="DKK" \
-PORT="${PORT:-3000}" \
-"/mnt/c/Program Files/nodejs/node.exe" dist/index-http.js
+node dist/index-http.js

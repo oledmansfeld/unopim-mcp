@@ -126,11 +126,13 @@ ngrok http 3000
 | `unopim_add_variant` | Add variant to configurable product |
 | `unopim_update_configurable_product` | Update configurable product |
 
-### Media Upload
+### Media Upload ⭐ Automatic Linking
 | Tool | Description |
 |------|-------------|
-| `unopim_upload_product_media` | Upload image to product |
-| `unopim_upload_category_media` | Upload image to category |
+| `unopim_upload_product_media` | ⭐ Upload image and **auto-link** to product |
+| `unopim_upload_category_media` | Upload image and auto-link to category |
+
+**Note:** Media upload tools now automatically update the product/category with the uploaded file path. Images are immediately visible in UnoPim UI after upload!
 
 ---
 
@@ -192,7 +194,7 @@ Creating a configurable product (e.g., T-shirt with color variants):
 
 ## 📸 Media Upload
 
-Upload product images via URL or base64:
+Upload product images via URL or base64 - **images are automatically linked to the product**:
 
 ```json
 // Via URL
@@ -210,6 +212,14 @@ Upload product images via URL or base64:
   "filename": "product-image.jpg"
 }
 ```
+
+**What happens automatically:**
+1. ✅ File uploads to UnoPim storage
+2. ✅ Attribute metadata fetched to determine scope (common/locale_specific/channel_specific/channel_locale_specific)
+3. ✅ Product updated with file path in correct value structure
+4. ✅ **Image immediately visible in UnoPim UI**
+
+No manual product update needed - the tool handles everything!
 
 ---
 

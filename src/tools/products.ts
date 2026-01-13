@@ -1099,7 +1099,7 @@ export async function uploadProductMedia(
         };
       }
       arrayBuffer = await response.arrayBuffer();
-      
+
       // Extract filename from URL or use provided
       filename = input.filename || input.file_url.split('/').pop() || 'uploaded-file';
     } else if (input.file_base64) {
@@ -1114,29 +1114,101 @@ export async function uploadProductMedia(
       };
     }
 
-    // Create FormData for multipart upload
+    // Step 1: Upload the file
     const formData = new FormData();
     const blob = new Blob([arrayBuffer]);
     formData.append('file', blob, filename);
     formData.append('sku', input.sku);
     formData.append('attribute', input.attribute);
 
-    // Make the request
-    const result = await client.postMultipart<MediaUploadResponse>('/media-files/product', formData);
-    
-    if (result.success) {
-      return {
-        success: true,
-        message: result.message || 'Product file uploaded successfully.',
-        filePath: result.data?.filePath || result.filePath,
-      };
-    } else {
+    const uploadResult = await client.postMultipart<MediaUploadResponse>('/media-files/product', formData);
+
+    if (!uploadResult.success) {
       return {
         success: false,
-        message: result.message || 'Upload failed',
-        error: JSON.stringify(result.errors || result),
+        message: uploadResult.message || 'Upload failed',
+        error: JSON.stringify(uploadResult.errors || uploadResult),
       };
     }
+
+    const filePath = uploadResult.data?.filePath || uploadResult.filePath;
+    if (!filePath) {
+      return {
+        success: false,
+        message: 'Upload succeeded but no filePath returned',
+        error: 'Missing filePath in response',
+      };
+    }
+
+    // Step 2: Fetch attribute metadata to determine scope
+    const attrResponse = await client.get<{
+      code: string;
+      type: string;
+      value_per_locale: number | boolean;
+      value_per_channel: number | boolean;
+    }>(`/api/v1/rest/attributes/${input.attribute}`);
+
+    const valuePerLocale = Boolean(attrResponse.value_per_locale);
+    const valuePerChannel = Boolean(attrResponse.value_per_channel);
+
+    // Step 3: Fetch current product to get locale/channel and preserve existing values
+    const productResponse = await client.get<{ data: Product }>(`/api/v1/rest/products/${encodeURIComponent(input.sku)}`);
+    const currentProduct = productResponse.data || productResponse;
+
+    if (!currentProduct) {
+      return {
+        success: false,
+        message: 'Failed to fetch product after upload',
+        error: 'Product not found',
+      };
+    }
+
+    // Get default locale and channel from config or product
+    const defaultLocale = process.env.UNOPIM_DEFAULT_LOCALE || 'en_US';
+    const defaultChannel = process.env.UNOPIM_DEFAULT_CHANNEL || 'default';
+
+    // Step 4: Update product with the file path in the correct scope
+    const updateValues: ProductValues = currentProduct.values || {
+      common: {},
+      categories: [],
+    };
+
+    // Place the filePath in the correct scope
+    if (!valuePerLocale && !valuePerChannel) {
+      // common scope
+      if (!updateValues.common) updateValues.common = {};
+      updateValues.common[input.attribute] = filePath;
+    } else if (valuePerLocale && !valuePerChannel) {
+      // locale_specific scope
+      if (!updateValues.locale_specific) updateValues.locale_specific = {};
+      if (!updateValues.locale_specific[defaultLocale]) updateValues.locale_specific[defaultLocale] = {};
+      updateValues.locale_specific[defaultLocale][input.attribute] = filePath;
+    } else if (!valuePerLocale && valuePerChannel) {
+      // channel_specific scope
+      if (!updateValues.channel_specific) updateValues.channel_specific = {};
+      if (!updateValues.channel_specific[defaultChannel]) updateValues.channel_specific[defaultChannel] = {};
+      updateValues.channel_specific[defaultChannel][input.attribute] = filePath;
+    } else {
+      // channel_locale_specific scope
+      if (!updateValues.channel_locale_specific) updateValues.channel_locale_specific = {};
+      if (!updateValues.channel_locale_specific[defaultChannel]) updateValues.channel_locale_specific[defaultChannel] = {};
+      if (!updateValues.channel_locale_specific[defaultChannel][defaultLocale]) {
+        updateValues.channel_locale_specific[defaultChannel][defaultLocale] = {};
+      }
+      updateValues.channel_locale_specific[defaultChannel][defaultLocale][input.attribute] = filePath;
+    }
+
+    // Step 5: Update the product
+    await client.patch<{ data: Product }>(
+      `/api/v1/rest/products/${encodeURIComponent(input.sku)}`,
+      { values: updateValues }
+    );
+
+    return {
+      success: true,
+      message: `Media uploaded and linked to product '${input.sku}' attribute '${input.attribute}'`,
+      filePath,
+    };
   } catch (error) {
     return {
       success: false,

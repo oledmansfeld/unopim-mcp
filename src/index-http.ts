@@ -209,19 +209,48 @@ Example for decimal attribute:
         },
         {
           name: 'unopim_create_attribute_options',
-          description: 'Create options for select/multiselect attributes',
+          description: `Create options for select/multiselect attributes.
+
+🔴 CRITICAL: Option codes MUST be lowercase with underscores only!
+Pattern: /^[a-z0-9_]+$/
+
+Example:
+{
+  "attribute_code": "color",
+  "options": [
+    { "code": "black", "labels": { "da_DK": "Sort", "en_US": "Black" }, "sort_order": 1 },
+    { "code": "white", "labels": { "da_DK": "Hvid", "en_US": "White" }, "sort_order": 2 },
+    { "code": "navy_blue", "labels": { "da_DK": "Marineblå", "en_US": "Navy Blue" }, "sort_order": 3 }
+  ]
+}
+
+⚠️ When you later create variants, use the EXACT same code:
+✅ CORRECT: { "color": "black" }
+❌ WRONG:   { "color": "Black" }  ← Uppercase = WILL FAIL!
+❌ WRONG:   { "color": "Sort" }   ← This is the LABEL, not the CODE!
+
+VALID: lowercase letters, numbers, underscores (black, size_xl, color_01)
+INVALID: uppercase, spaces, special chars (Black, Size XL, Color-01)`,
           inputSchema: {
             type: 'object',
             properties: {
-              attribute_code: { type: 'string' },
-              options: { type: 'array' },
+              attribute_code: { type: 'string', description: 'The attribute code to add options to' },
+              options: { type: 'array', description: 'Array of options with code, labels, sort_order' },
             },
             required: ['attribute_code', 'options'],
           },
         },
         {
           name: 'unopim_get_attribute_options',
-          description: 'Get all options for a select/multiselect attribute. Use this to check which options already exist before creating new ones.',
+          description: `Get all options for a select/multiselect attribute.
+
+⚠️ ALWAYS call this BEFORE using option values in products/variants!
+Option codes are always lowercase - use them exactly as returned.
+
+Use this to:
+1. Check which options already exist
+2. Get the EXACT code values to use in products/variants (e.g., "black", "navy_blue")
+3. Verify correct lowercase format before creating variants`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -275,6 +304,22 @@ Example:
         {
           name: 'unopim_create_family',
           description: `Create a product family. Families define which attributes a product type has.
+
+⚠️ MANDATORY PRE-REQUISITES:
+1. Call unopim_get_schema() FIRST to check what exists
+2. ALL attributes in custom_attributes MUST exist (use unopim_create_attribute first!)
+3. For select/multiselect attributes, options MUST exist (use unopim_create_attribute_options)
+4. ONLY THEN create the family
+
+❌ THIS WILL FAIL IF:
+- Any attribute code in custom_attributes does not exist
+- Attribute group code is invalid
+
+✅ CORRECT ORDER:
+1. unopim_get_attributes() - Check what exists
+2. unopim_create_attribute() - For EACH missing attribute
+3. unopim_create_attribute_options() - For select/multiselect types
+4. unopim_create_family() - Only after all attributes exist
 
 IMPORTANT - attribute_groups format:
 Each group MUST have: code, position (number), custom_attributes (array)
@@ -363,6 +408,20 @@ NOTE: Use "root" or null for top-level categories`,
           name: 'unopim_create_product',
           description: `Create a simple product in UnoPim.
 
+⚠️ MANDATORY PRE-REQUISITES (in order):
+1. Call unopim_get_schema() FIRST to check what exists
+2. Ensure ALL required attributes exist (use unopim_create_attribute if not)
+3. Ensure attribute options exist for select types (use unopim_create_attribute_options)
+4. Ensure family exists (use unopim_create_family if not)
+5. Ensure categories exist (use unopim_create_category if not)
+6. ONLY THEN create the product
+
+❌ THIS WILL FAIL IF:
+- Family does not exist
+- Required attributes missing from family
+- Category codes don't exist
+- Using option values that don't exist (case-sensitive!)
+
 WORKING EXAMPLE:
 {
   "sku": "product-001",
@@ -408,10 +467,29 @@ CRITICAL NOTES:
           name: 'unopim_create_configurable_product',
           description: `Create a configurable product (parent product with variants like T-shirt with colors).
 
-⚠️ IMPORTANT WORKFLOW:
-1. First create the configurable product with this tool (creates parent only)
-2. Then use unopim_add_variant to add each variant separately
-3. The "variants" array in this request is IGNORED by the API!
+🔴 CRITICAL: CREATE PARENT FIRST, THEN VARIANTS!
+This creates the PARENT product only. Variants must be added AFTER with unopim_add_variant.
+
+⚠️ MANDATORY PRE-REQUISITES (in order):
+1. Call unopim_get_schema() FIRST to check what exists
+2. Ensure super_attributes exist as SELECT type with is_configurable=true
+3. Ensure super_attributes have OPTIONS defined (use unopim_get_attribute_options)
+4. Ensure ALL other required attributes exist
+5. Ensure family exists with all attributes
+6. ONLY THEN create the configurable product (parent)
+7. AFTER parent exists, add variants with unopim_add_variant
+
+❌ COMMON MISTAKES (WILL FAIL):
+- Creating variants before parent product
+- Using non-select type as super_attribute
+- Super_attribute missing is_configurable=true flag
+- Options don't exist for super_attributes
+
+✅ CORRECT ORDER:
+1. unopim_create_configurable_product() ← Creates PARENT only
+2. unopim_add_variant() ← Add variant 1
+3. unopim_add_variant() ← Add variant 2
+4. ... repeat for each variant
 
 WORKING EXAMPLE:
 {
@@ -431,11 +509,10 @@ WORKING EXAMPLE:
 }
 
 CRITICAL NOTES:
-- "name" MUST be in channel_locale_specific (NOT common!) because it has value_per_locale=1 AND value_per_channel=1
+- "name" MUST be in channel_locale_specific (NOT common!)
 - super_attributes must be select-type attributes (e.g., color, size)
-- API endpoint has typo: /api/v1/rest/configrable-products (missing 'u')
-- After creating, use unopim_add_variant to add variants one by one
-- Use unopim_get_attribute_options to find valid option codes for super_attributes`,
+- The "variants" array is IGNORED by API - use unopim_add_variant instead
+- Use unopim_get_attribute_options to find valid option codes`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -452,7 +529,21 @@ CRITICAL NOTES:
           name: 'unopim_add_variant',
           description: `Add a variant (child product) to an existing configurable product.
 
-USE THIS AFTER creating a configurable product with unopim_create_configurable_product.
+🔴 CRITICAL: PARENT MUST EXIST FIRST!
+The parent configurable product MUST be created with unopim_create_configurable_product BEFORE calling this.
+
+🔴 CRITICAL: OPTION VALUES MUST BE LOWERCASE!
+Option codes are always lowercase with underscores only (e.g., "red", "navy_blue", "size_xl")
+
+❌ THIS WILL FAIL IF:
+- Parent product does not exist
+- Parent is not a configurable product
+- variant_attributes don't match parent's super_attributes
+- Option values not lowercase (e.g., "Red" instead of "red")
+
+✅ CORRECT ORDER:
+1. FIRST: unopim_create_configurable_product() ← Parent
+2. THEN: unopim_add_variant() ← This tool, for each variant
 
 WORKING EXAMPLE:
 {
@@ -460,7 +551,7 @@ WORKING EXAMPLE:
   "family": "default",
   "sku": "tshirt-red-001",
   "values": {
-    "common": { "sku": "tshirt-red-001", "color": "Red" },
+    "common": { "sku": "tshirt-red-001", "color": "red" },
     "channel_locale_specific": {
       "default": {
         "en_US": { "name": "T-Shirt Red" }
@@ -468,15 +559,16 @@ WORKING EXAMPLE:
     },
     "categories": []
   },
-  "variant_attributes": { "color": "Red" }
+  "variant_attributes": { "color": "red" }
 }
 
 CRITICAL NOTES:
-- parent must be an existing configurable product SKU
-- variant_attributes MUST match the super_attributes of the parent (e.g., if parent has super_attributes: ["color"], variant needs variant_attributes: { "color": "Red" })
-- Also set the super_attribute value in values.common (e.g., "color": "Red")
+- parent must be an existing configurable product SKU (create it first!)
+- variant_attributes MUST match the super_attributes of the parent
+- Option values MUST be lowercase (e.g., "red" not "Red")
+- Also set the super_attribute value in values.common (e.g., "color": "red")
 - "name" MUST be in channel_locale_specific (NOT common!)
-- Attribute option values are CASE-SENSITIVE (use unopim_get_attribute_options to find exact codes)
+- Use unopim_get_attribute_options to verify correct option codes
 - family must be same as parent's family`,
           inputSchema: {
             type: 'object',
@@ -661,16 +753,24 @@ The tool knows where to put each attribute based on family config!`,
         },
         {
           name: 'unopim_upload_product_media',
-          description: `Upload an image or file to a product attribute (e.g., product image).
+          description: `Upload an image or file to a product attribute AND automatically link it to the product.
 
-EXAMPLE:
+This is a COMPLETE workflow that:
+1. Uploads the file to UnoPim storage
+2. Fetches attribute metadata to determine correct scope (common/locale_specific/channel_specific/channel_locale_specific)
+3. Updates the product to reference the uploaded file in the correct value structure
+4. Returns success with the filePath
+
+After calling this tool, the image will be IMMEDIATELY VISIBLE on the product in UnoPim UI.
+
+EXAMPLE - Upload from URL:
 {
   "sku": "PROD001",
   "attribute": "image",
   "file_url": "https://example.com/image.jpg"
 }
 
-OR with base64:
+EXAMPLE - Upload from base64:
 {
   "sku": "PROD001",
   "attribute": "image",
@@ -680,9 +780,10 @@ OR with base64:
 
 NOTES:
 - The product must exist before uploading media
-- attribute must be an image/file type attribute in the product's family
+- The attribute must be an image/file type attribute in the product's family
 - Provide EITHER file_url OR file_base64, not both
-- Returns the filePath which can be used in product values`,
+- The tool automatically determines the correct value scope based on attribute settings
+- No need to manually update product values after upload - it's done automatically`,
           inputSchema: {
             type: 'object',
             properties: {
