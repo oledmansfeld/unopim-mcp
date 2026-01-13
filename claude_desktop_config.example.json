@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "unopim": {
+      "command": "node",
+      "args": ["/absolute/path/to/unopim-mcp/dist/index.js"],
+      "env": {
+        "UNOPIM_BASE_URL": "https://your-instance.pim.dk",
+        "UNOPIM_CLIENT_ID": "your-client-id",
+        "UNOPIM_CLIENT_SECRET": "your-client-secret",
+        "UNOPIM_USERNAME": "your-username",
+        "UNOPIM_PASSWORD": "your-password",
+        "UNOPIM_DEFAULT_LOCALE": "da_DK",
+        "UNOPIM_DEFAULT_CURRENCY": "DKK"
+      }
+    }
+  }
+}

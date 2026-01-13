@@ -1,0 +1,1157 @@
+#!/usr/bin/env node
+
+/**
+ * UnoPim MCP Server - HTTP Transport
+ * Exposes MCP server over HTTP for remote access (e.g., via ngrok)
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ErrorCode,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
+import http from 'http';
+
+import { loadConfig } from './config.js';
+import { OAuthManager } from './auth/oauth.js';
+import { UnoPimClient } from './client/unopim-client.js';
+
+// Import tool implementations
+import {
+  getSchema,
+  getAttributes,
+  getFamilies,
+  GetSchemaInputSchema,
+  GetAttributesInputSchema,
+  GetFamiliesInputSchema,
+} from './tools/schema.js';
+
+import {
+  createAttribute,
+  createAttributeOptions,
+  getAttributeOptions,
+  CreateAttributeInputSchema,
+  CreateAttributeOptionsInputSchema,
+  GetAttributeOptionsInputSchema,
+} from './tools/attributes.js';
+
+import {
+  getAttributeGroups,
+  createAttributeGroup,
+  GetAttributeGroupsInputSchema,
+  CreateAttributeGroupInputSchema,
+} from './tools/groups.js';
+
+import {
+  createFamily,
+  updateFamily,
+  CreateFamilyInputSchema,
+  UpdateFamilyInputSchema,
+} from './tools/families.js';
+
+import {
+  getCategories,
+  createCategory,
+  GetCategoriesInputSchema,
+  CreateCategoryInputSchema,
+} from './tools/categories.js';
+
+import {
+  createProduct,
+  createConfigurableProduct,
+  bulkCreateProducts,
+  getProducts,
+  getProduct,
+  updateProduct,
+  upsertProduct,
+  smartCreateProduct,
+  getFamilySchema,
+  uploadProductMedia,
+  uploadCategoryMedia,
+  CreateProductInputSchema,
+  CreateConfigurableProductInputSchema,
+  BulkCreateProductsInputSchema,
+  GetProductsInputSchema,
+  GetProductInputSchema,
+  UpdateProductInputSchema,
+  UpsertProductInputSchema,
+  SmartCreateProductInputSchema,
+  GetFamilySchemaInputSchema,
+  UploadProductMediaInputSchema,
+  UploadCategoryMediaInputSchema,
+} from './tools/products.js';
+
+// ============================================================================
+// HTTP Server Setup
+// ============================================================================
+
+class UnoPimHttpServer {
+  private server: Server;
+  private client: UnoPimClient;
+  private httpServer!: http.Server;
+  private port: number;
+  private transports: Map<string, SSEServerTransport> = new Map();
+
+  constructor(port: number = 3000) {
+    this.port = port;
+
+    // Load configuration
+    const config = loadConfig();
+
+    // Initialize OAuth manager
+    const authManager = new OAuthManager(config.baseUrl, {
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      username: config.username,
+      password: config.password,
+    });
+
+    // Initialize UnoPim client
+    this.client = new UnoPimClient(config.baseUrl, authManager);
+
+    // Initialize MCP server
+    this.server = new Server(
+      {
+        name: 'unopim-mcp',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+
+    this.setupHandlers();
+    this.setupHttpServer();
+  }
+
+  private setupHandlers() {
+    // List available tools
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [
+        // Schema Tools
+        {
+          name: 'unopim_get_schema',
+          description: 'Fetch complete datamodel overview from UnoPim including attributes, families, categories, channels, and locales',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              include_attributes: { type: 'boolean', default: true },
+              include_families: { type: 'boolean', default: true },
+              include_categories: { type: 'boolean', default: true },
+              include_channels: { type: 'boolean', default: false },
+              include_locales: { type: 'boolean', default: false },
+            },
+          },
+        },
+        {
+          name: 'unopim_get_attributes',
+          description: 'List all attributes with optional filtering by type or group',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              filter_by_type: { type: 'string' },
+              filter_by_group: { type: 'string' },
+              limit: { type: 'number', default: 100 },
+              page: { type: 'number', default: 1 },
+            },
+          },
+        },
+        {
+          name: 'unopim_get_families',
+          description: 'List all product families',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', default: 100 },
+              page: { type: 'number', default: 1 },
+            },
+          },
+        },
+        {
+          name: 'unopim_create_attribute',
+          description: `Create a new attribute in UnoPim.
+
+IMPORTANT - Attribute Types:
+- type must be one of: text, textarea, boolean, price, select, multiselect, image
+- For NUMBER/INTEGER fields: use type="text" with validation="number"
+- For DECIMAL/FLOAT fields: use type="text" with validation="decimal"
+- For EMAIL fields: use type="text" with validation="email"
+- For URL fields: use type="text" with validation="url"
+- For DATE fields: use type="text" (dates are stored as text)
+
+Example for decimal attribute:
+{
+  "code": "weight",
+  "type": "text",
+  "validation": "decimal",
+  "labels": { "en_US": "Weight" }
+}`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Unique attribute code (lowercase, underscores allowed)' },
+              type: { type: 'string', enum: ['text', 'textarea', 'boolean', 'price', 'select', 'multiselect', 'image'], description: 'Attribute type. Use "text" with validation for number/decimal/email/url' },
+              validation: { type: 'string', enum: ['decimal', 'number', 'email', 'url', 'regexp'], description: 'Validation rule for text fields. Use "decimal" for floats, "number" for integers' },
+              labels: { type: 'object', description: 'Labels by locale, e.g. { "en_US": "My Label" }' },
+              is_required: { type: 'boolean', default: false },
+              is_unique: { type: 'boolean', default: false },
+              is_configurable: { type: 'boolean', default: false, description: 'Set true for attributes used in configurable products (e.g., color, size)' },
+              value_per_locale: { type: 'boolean', default: false },
+              value_per_channel: { type: 'boolean', default: false },
+            },
+            required: ['code', 'type', 'labels'],
+          },
+        },
+        {
+          name: 'unopim_create_attribute_options',
+          description: 'Create options for select/multiselect attributes',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              attribute_code: { type: 'string' },
+              options: { type: 'array' },
+            },
+            required: ['attribute_code', 'options'],
+          },
+        },
+        {
+          name: 'unopim_get_attribute_options',
+          description: 'Get all options for a select/multiselect attribute. Use this to check which options already exist before creating new ones.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              attribute_code: { type: 'string', description: 'The attribute code (e.g., "color", "size")' },
+            },
+            required: ['attribute_code'],
+          },
+        },
+        {
+          name: 'unopim_get_attribute_groups',
+          description: `Get all attribute groups from UnoPim.
+
+Attribute groups are used to organize attributes in families. Use this to:
+1. Check which groups exist before creating a family
+2. Find group codes to reference in families
+
+Common groups: "general", "marketing", "technical", "media"`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', default: 100 },
+              page: { type: 'number', default: 1 },
+            },
+          },
+        },
+        {
+          name: 'unopim_create_attribute_group',
+          description: `Create a new attribute group. Groups organize attributes within families.
+
+WORKFLOW for setting up a product structure:
+1. Create attribute groups (e.g., "general", "prices", "media")
+2. Create attributes (e.g., "name", "price", "image")
+3. Create family with groups and assign attributes to groups
+4. Create products using the family
+
+Example:
+{
+  "code": "technical_specs",
+  "labels": { "en_US": "Technical Specifications", "da_DK": "Tekniske Specifikationer" }
+}`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Unique group code (lowercase, underscores)' },
+              labels: { type: 'object', description: 'Labels by locale' },
+              position: { type: 'number', description: 'Sort order position' },
+            },
+            required: ['code', 'labels'],
+          },
+        },
+        {
+          name: 'unopim_create_family',
+          description: `Create a product family. Families define which attributes a product type has.
+
+IMPORTANT - attribute_groups format:
+Each group MUST have: code, position (number), custom_attributes (array)
+
+Example:
+{
+  "code": "clothing",
+  "labels": { "en_US": "Clothing" },
+  "attribute_groups": [
+    {
+      "code": "general",
+      "position": 1,
+      "custom_attributes": [
+        { "code": "sku", "position": 1 },
+        { "code": "name", "position": 2 }
+      ]
+    }
+  ]
+}`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Unique family code' },
+              labels: { type: 'object', description: 'Labels by locale' },
+              attribute_groups: { 
+                type: 'array', 
+                description: 'Array of attribute groups. Each group needs: code (string), position (number, REQUIRED), custom_attributes (array of {code, position}, REQUIRED)'
+              },
+            },
+            required: ['code', 'labels', 'attribute_groups'],
+          },
+        },
+        {
+          name: 'unopim_update_family',
+          description: 'Update an existing family',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string' },
+              add_attributes: { type: 'array' },
+              remove_attributes: { type: 'array' },
+              update_labels: { type: 'object' },
+            },
+            required: ['code'],
+          },
+        },
+        {
+          name: 'unopim_get_categories',
+          description: 'Fetch category tree',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              parent_code: { type: 'string' },
+              limit: { type: 'number', default: 100 },
+              page: { type: 'number', default: 1 },
+            },
+          },
+        },
+        {
+          name: 'unopim_create_category',
+          description: `Create a new category in the product catalog.
+
+Example:
+{
+  "code": "electronics",
+  "parent": "root",
+  "labels": { "en_US": "Electronics" },
+  "additional_data": {
+    "locale_specific": { "en_US": { "description": "Electronic products" } }
+  }
+}
+
+NOTE: Use "root" or null for top-level categories`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Unique category code' },
+              parent: { type: 'string', description: 'Parent category code. Use "root" or null for top-level' },
+              labels: { type: 'object', description: 'Labels by locale, e.g. { "en_US": "Category Name" }' },
+              additional_data: { type: 'object', description: 'Additional category fields (locale_specific, etc.)' },
+            },
+            required: ['code', 'labels'],
+          },
+        },
+        {
+          name: 'unopim_create_product',
+          description: `Create a simple product in UnoPim.
+
+WORKING EXAMPLE:
+{
+  "sku": "product-001",
+  "family": "default",
+  "values": {
+    "common": { "sku": "product-001" },
+    "channel_locale_specific": {
+      "default": {
+        "en_US": {
+          "name": "Product Name",
+          "price": { "EUR": "99.99" },
+          "description": "<p>Description</p>"
+        }
+      }
+    },
+    "categories": ["category_code"],
+    "associations": {
+      "up_sells": [],
+      "cross_sells": [],
+      "related_products": []
+    }
+  }
+}
+
+CRITICAL NOTES:
+- "name" attribute requires channel_locale_specific format (NOT common!) because it has value_per_locale=1 AND value_per_channel=1
+- categories goes at top level of values, NOT inside common!
+- To create a variant of a configurable product, use unopim_add_variant instead`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'Unique product SKU' },
+              family: { type: 'string', description: 'Family code (e.g., "default", "clothing")' },
+              values: { 
+                type: 'object', 
+                description: 'Product values with: common (attributes), categories (array at top level!), locale_specific, channel_specific, associations'
+              },
+            },
+            required: ['sku', 'family', 'values'],
+          },
+        },
+        {
+          name: 'unopim_create_configurable_product',
+          description: `Create a configurable product (parent product with variants like T-shirt with colors).
+
+⚠️ IMPORTANT WORKFLOW:
+1. First create the configurable product with this tool (creates parent only)
+2. Then use unopim_add_variant to add each variant separately
+3. The "variants" array in this request is IGNORED by the API!
+
+WORKING EXAMPLE:
+{
+  "sku": "tshirt-config-001",
+  "family": "default",
+  "super_attributes": ["color"],
+  "values": {
+    "common": { "sku": "tshirt-config-001" },
+    "channel_locale_specific": {
+      "default": {
+        "en_US": { "name": "T-Shirt Configurable" }
+      }
+    },
+    "categories": [],
+    "associations": { "up_sells": [], "cross_sells": [], "related_products": [] }
+  }
+}
+
+CRITICAL NOTES:
+- "name" MUST be in channel_locale_specific (NOT common!) because it has value_per_locale=1 AND value_per_channel=1
+- super_attributes must be select-type attributes (e.g., color, size)
+- API endpoint has typo: /api/v1/rest/configrable-products (missing 'u')
+- After creating, use unopim_add_variant to add variants one by one
+- Use unopim_get_attribute_options to find valid option codes for super_attributes`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'Unique SKU for the configurable product' },
+              family: { type: 'string', description: 'Family code' },
+              super_attributes: { type: 'array', description: 'Array of attribute codes used for variants (e.g., ["color", "size"])' },
+              values: { type: 'object', description: 'Product values with common, categories, associations, channel_specific, channel_locale_specific' },
+              variants: { type: 'array', description: 'Array of variants, each with sku and attributes object matching super_attributes' },
+            },
+            required: ['sku', 'family', 'super_attributes', 'values'],
+          },
+        },
+        {
+          name: 'unopim_add_variant',
+          description: `Add a variant (child product) to an existing configurable product.
+
+USE THIS AFTER creating a configurable product with unopim_create_configurable_product.
+
+WORKING EXAMPLE:
+{
+  "parent": "tshirt-config-001",
+  "family": "default",
+  "sku": "tshirt-red-001",
+  "values": {
+    "common": { "sku": "tshirt-red-001", "color": "Red" },
+    "channel_locale_specific": {
+      "default": {
+        "en_US": { "name": "T-Shirt Red" }
+      }
+    },
+    "categories": []
+  },
+  "variant_attributes": { "color": "Red" }
+}
+
+CRITICAL NOTES:
+- parent must be an existing configurable product SKU
+- variant_attributes MUST match the super_attributes of the parent (e.g., if parent has super_attributes: ["color"], variant needs variant_attributes: { "color": "Red" })
+- Also set the super_attribute value in values.common (e.g., "color": "Red")
+- "name" MUST be in channel_locale_specific (NOT common!)
+- Attribute option values are CASE-SENSITIVE (use unopim_get_attribute_options to find exact codes)
+- family must be same as parent's family`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              parent: { type: 'string', description: 'SKU of the parent configurable product' },
+              family: { type: 'string', description: 'Family code (same as parent)' },
+              sku: { type: 'string', description: 'Unique SKU for the variant' },
+              values: { type: 'object', description: 'Product values with common, categories, associations, channel_specific, channel_locale_specific' },
+              variant_attributes: { type: 'object', description: 'Object with super_attribute values, e.g., { "color": "red", "size": "small" }' },
+            },
+            required: ['parent', 'family', 'sku', 'values', 'variant_attributes'],
+          },
+        },
+        {
+          name: 'unopim_update_configurable_product',
+          description: `Update an existing configurable product's values.
+
+WORKING EXAMPLE:
+{
+  "sku": "tshirt-config-001",
+  "values": {
+    "common": { "sku": "tshirt-config-001" },
+    "channel_locale_specific": {
+      "default": {
+        "en_US": { "name": "T-Shirt Configurable Updated" }
+      }
+    },
+    "categories": ["clothing"],
+    "associations": { "up_sells": [], "cross_sells": [], "related_products": [] }
+  },
+  "super_attributes": ["color"]
+}
+
+NOTES:
+- Uses PUT to /api/v1/rest/configrable-products/{sku} (note: typo in API endpoint)
+- "name" MUST be in channel_locale_specific (NOT common!)
+- To add new variants, use unopim_add_variant`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'SKU of the configurable product to update' },
+              values: { type: 'object', description: 'Product values with common, categories, associations' },
+              super_attributes: { type: 'array', description: 'Array of attribute codes used for variants' },
+              variants: { type: 'array', description: 'Array of variants with sku and attributes' },
+            },
+            required: ['sku', 'values'],
+          },
+        },
+        {
+          name: 'unopim_bulk_create_products',
+          description: 'Batch create multiple products',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              products: { type: 'array' },
+              on_error: { type: 'string', enum: ['stop', 'continue'], default: 'continue' },
+            },
+            required: ['products'],
+          },
+        },
+        {
+          name: 'unopim_get_products',
+          description: 'List products with optional filtering by SKU, family, or type',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              filter_sku: { type: 'string', description: 'Filter by SKU (partial match)' },
+              filter_family: { type: 'string', description: 'Filter by family code' },
+              filter_type: { type: 'string', enum: ['simple', 'configurable'], description: 'Filter by product type' },
+              limit: { type: 'number', default: 100 },
+              page: { type: 'number', default: 1 },
+            },
+          },
+        },
+        {
+          name: 'unopim_get_product',
+          description: 'Get a single product by SKU. Returns found=false if product does not exist.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The product SKU' },
+            },
+            required: ['sku'],
+          },
+        },
+        {
+          name: 'unopim_update_product',
+          description: 'Update an existing product by SKU',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The product SKU to update' },
+              values: { type: 'object', description: 'The product values to update' },
+            },
+            required: ['sku', 'values'],
+          },
+        },
+        {
+          name: 'unopim_upsert_product',
+          description: `Create or update a product. If SKU exists, updates it; otherwise creates new product.
+
+IMPORTANT - values structure (same as create_product):
+{
+  "common": { "sku": "ABC123", "name": "Product Name" },
+  "categories": ["category_code1"],
+  "locale_specific": { "en_US": { "description": "Desc" } },
+  "channel_specific": { "default": { "attr": "value" } }
+}
+
+NOTE: categories at top level of values, NOT inside common!`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The product SKU' },
+              family: { type: 'string', description: 'The family code (required for creation)' },
+              values: { type: 'object', description: 'The product values' },
+            },
+            required: ['sku', 'family', 'values'],
+          },
+        },
+        {
+          name: 'unopim_get_family_schema',
+          description: `Get detailed schema for a product family. Returns:
+- All attributes in the family with their types and scopes
+- Which attributes are REQUIRED vs optional
+- Correct structure for values object
+- Example values template
+
+ALWAYS call this BEFORE creating products to understand:
+1. What attributes are required
+2. Where each attribute should go (common, locale_specific, channel_locale_specific)
+
+This is essential because required fields and scopes are configurable per installation!`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              family: { type: 'string', description: 'The family code to get schema for' },
+            },
+            required: ['family'],
+          },
+        },
+        {
+          name: 'unopim_smart_create_product',
+          description: `RECOMMENDED: Intelligently creates a product with automatic value structuring.
+
+Unlike basic create_product, this tool:
+1. Fetches family schema to understand required fields
+2. Auto-places values in correct scope (common/locale/channel)
+3. Validates BEFORE submission
+4. Returns detailed error info
+
+USAGE: Provide flat values object - tool auto-structures it:
+{
+  "sku": "PROD001",
+  "family": "default",
+  "locale": "en_US",
+  "channel": "default",
+  "values": {
+    "sku": "PROD001",
+    "url_key": "prod001",
+    "name": "My Product",
+    "description": "<p>Description</p>",
+    "price": {"EUR": "99.99"}
+  },
+  "validate_only": false
+}
+
+The tool knows where to put each attribute based on family config!`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'Unique product identifier' },
+              family: { type: 'string', description: 'Family code' },
+              locale: { type: 'string', description: 'Locale for locale-specific values (default: en_US)' },
+              channel: { type: 'string', description: 'Channel for channel-specific values (default: default)' },
+              values: { type: 'object', description: 'Flat object with ALL attribute values - will be auto-structured' },
+              categories: { type: 'array', items: { type: 'string' }, description: 'Category codes' },
+              validate_only: { type: 'boolean', description: 'If true, only validates without creating' },
+            },
+            required: ['sku', 'family', 'values'],
+          },
+        },
+        {
+          name: 'unopim_upload_product_media',
+          description: `Upload an image or file to a product attribute (e.g., product image).
+
+EXAMPLE:
+{
+  "sku": "PROD001",
+  "attribute": "image",
+  "file_url": "https://example.com/image.jpg"
+}
+
+OR with base64:
+{
+  "sku": "PROD001",
+  "attribute": "image",
+  "file_base64": "iVBORw0KGgo...",
+  "filename": "product-image.jpg"
+}
+
+NOTES:
+- The product must exist before uploading media
+- attribute must be an image/file type attribute in the product's family
+- Provide EITHER file_url OR file_base64, not both
+- Returns the filePath which can be used in product values`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The product SKU to attach media to' },
+              attribute: { type: 'string', description: 'The attribute code (e.g., "image")' },
+              file_url: { type: 'string', description: 'URL to fetch the file from' },
+              file_base64: { type: 'string', description: 'Base64-encoded file content' },
+              filename: { type: 'string', description: 'Filename (required for base64, optional for URL)' },
+            },
+            required: ['sku', 'attribute'],
+          },
+        },
+        {
+          name: 'unopim_upload_category_media',
+          description: `Upload an image or file to a category field.
+
+EXAMPLE:
+{
+  "code": "electronics",
+  "category_field": "image",
+  "file_url": "https://example.com/category-image.jpg"
+}
+
+NOTES:
+- The category must exist before uploading media
+- category_field must be a file/image type field`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'The category code' },
+              category_field: { type: 'string', description: 'The category field code (e.g., "image")' },
+              file_url: { type: 'string', description: 'URL to fetch the file from' },
+              file_base64: { type: 'string', description: 'Base64-encoded file content' },
+              filename: { type: 'string', description: 'Filename (required for base64, optional for URL)' },
+            },
+            required: ['code', 'category_field'],
+          },
+        },
+      ],
+    }));
+
+    // Handle tool calls
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      try {
+        switch (name) {
+          case 'unopim_get_schema': {
+            const input = GetSchemaInputSchema.parse(args);
+            const result = await getSchema(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_attributes': {
+            const input = GetAttributesInputSchema.parse(args);
+            const result = await getAttributes(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_families': {
+            const input = GetFamiliesInputSchema.parse(args);
+            const result = await getFamilies(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_attribute': {
+            const input = CreateAttributeInputSchema.parse(args);
+            const result = await createAttribute(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_attribute_options': {
+            const input = CreateAttributeOptionsInputSchema.parse(args);
+            const result = await createAttributeOptions(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_attribute_options': {
+            const input = GetAttributeOptionsInputSchema.parse(args);
+            const result = await getAttributeOptions(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_attribute_groups': {
+            const input = GetAttributeGroupsInputSchema.parse(args);
+            const result = await getAttributeGroups(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_attribute_group': {
+            const input = CreateAttributeGroupInputSchema.parse(args);
+            const result = await createAttributeGroup(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_family': {
+            const input = CreateFamilyInputSchema.parse(args);
+            const result = await createFamily(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_update_family': {
+            const input = UpdateFamilyInputSchema.parse(args);
+            const result = await updateFamily(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_categories': {
+            const input = GetCategoriesInputSchema.parse(args);
+            const result = await getCategories(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_category': {
+            const input = CreateCategoryInputSchema.parse(args);
+            const result = await createCategory(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_product': {
+            const input = CreateProductInputSchema.parse(args);
+            const result = await createProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_create_configurable_product': {
+            const input = CreateConfigurableProductInputSchema.parse(args);
+            const result = await createConfigurableProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_add_variant': {
+            // Add variant to existing configurable product
+            const { parent, family, sku, values, variant_attributes } = args as {
+              parent: string;
+              family: string;
+              sku: string;
+              values: Record<string, unknown>;
+              variant_attributes: Record<string, string>;
+            };
+            
+            // Ensure SKU is in values.common
+            const variantValues = { ...values };
+            if (!variantValues.common) {
+              variantValues.common = {};
+            }
+            (variantValues.common as Record<string, unknown>)['sku'] = sku;
+
+            const variantData = {
+              parent: parent,
+              family: family,
+              additional: null,
+              values: variantValues,
+              variant: {
+                attributes: variant_attributes
+              }
+            };
+
+            const response = await this.client.post<{ success?: boolean; message?: string; data?: unknown }>(
+              '/api/v1/rest/products',
+              variantData
+            );
+
+            return { content: [{ type: 'text', text: JSON.stringify({
+              success: true,
+              message: response.message || 'Variant created successfully',
+              sku: sku,
+              parent: parent,
+              variant_attributes: variant_attributes
+            }, null, 2) }] };
+          }
+          case 'unopim_update_configurable_product': {
+            // Update configurable product
+            const { sku, values, super_attributes, variants } = args as {
+              sku: string;
+              values: Record<string, unknown>;
+              super_attributes?: string[];
+              variants?: Array<{ sku: string; attributes: Record<string, string> }>;
+            };
+            
+            // Ensure SKU is in values.common
+            const updateValues = { ...values };
+            if (!updateValues.common) {
+              updateValues.common = {};
+            }
+            (updateValues.common as Record<string, unknown>)['sku'] = sku;
+
+            const updateData: Record<string, unknown> = {
+              parent: null,
+              additional: null,
+              values: updateValues,
+            };
+
+            if (super_attributes) {
+              updateData.super_attributes = super_attributes;
+            }
+            if (variants) {
+              updateData.variants = variants;
+            }
+
+            // Use PUT to /api/v1/rest/configrable-products/{sku} (note: typo in API)
+            const response = await this.client.put<{ success?: boolean; message?: string; data?: unknown }>(
+              `/api/v1/rest/configrable-products/${encodeURIComponent(sku)}`,
+              updateData
+            );
+
+            return { content: [{ type: 'text', text: JSON.stringify({
+              success: true,
+              message: response.message || 'Configurable product updated successfully',
+              sku: sku
+            }, null, 2) }] };
+          }
+          case 'unopim_bulk_create_products': {
+            const input = BulkCreateProductsInputSchema.parse(args);
+            const result = await bulkCreateProducts(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_products': {
+            const input = GetProductsInputSchema.parse(args);
+            const result = await getProducts(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_product': {
+            const input = GetProductInputSchema.parse(args);
+            const result = await getProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_update_product': {
+            const input = UpdateProductInputSchema.parse(args);
+            const result = await updateProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_upsert_product': {
+            const input = UpsertProductInputSchema.parse(args);
+            const result = await upsertProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_get_family_schema': {
+            const input = GetFamilySchemaInputSchema.parse(args);
+            const result = await getFamilySchema(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_smart_create_product': {
+            const input = SmartCreateProductInputSchema.parse(args);
+            const result = await smartCreateProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_upload_product_media': {
+            const input = UploadProductMediaInputSchema.parse(args);
+            const result = await uploadProductMedia(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_upload_category_media': {
+            const input = UploadCategoryMediaInputSchema.parse(args);
+            const result = await uploadCategoryMedia(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          default:
+            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+        }
+      } catch (error) {
+        // Log detailed error for debugging
+        console.error(`\n❌ Tool '${name}' failed:`);
+        console.error(`   Error: ${error}`);
+        
+        if (error instanceof McpError) {
+          throw error;
+        }
+        
+        // Check for UnoPimApiError with details
+        if (error instanceof Error && 'details' in error) {
+          const apiError = error as Error & { details?: unknown; code?: string; statusCode?: number };
+          const details = apiError.details;
+          console.error(`   API Details:`, JSON.stringify(details, null, 2));
+          
+          // Format detailed error message
+          let detailMessage = '';
+          if (details && typeof details === 'object') {
+            const d = details as Record<string, unknown>;
+            if (d.message) {
+              detailMessage = String(d.message);
+            }
+            if (d.errors && typeof d.errors === 'object') {
+              const errorEntries = Object.entries(d.errors as Record<string, unknown>);
+              const errorMessages = errorEntries.map(([field, msgs]) => {
+                const msgArr = Array.isArray(msgs) ? msgs : [msgs];
+                return `${field}: ${msgArr.join(', ')}`;
+              });
+              detailMessage += (detailMessage ? ' - ' : '') + errorMessages.join('; ');
+            }
+          }
+          
+          throw new McpError(
+            ErrorCode.InternalError,
+            `API Error (${apiError.code || 'unknown'}): ${apiError.message}${detailMessage ? ` - ${detailMessage}` : ''}`
+          );
+        }
+        
+        if (error instanceof Error && error.name === 'ZodError') {
+          throw new McpError(ErrorCode.InvalidParams, `Validation error: ${error.message}`);
+        }
+        
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    });
+  }
+
+  private setupHttpServer() {
+    this.httpServer = http.createServer(async (req, res) => {
+      // CORS headers
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+
+      if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'healthy', version: '1.0.0' }));
+        return;
+      }
+
+      // OAuth 2.0 Authorization Server Metadata (RFC 8414)
+      // Return empty/minimal response indicating no auth required
+      if (req.url === '/.well-known/oauth-authorization-server' ||
+          req.url?.startsWith('/.well-known/oauth-authorization-server/')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          issuer: `http://localhost:${this.port}`,
+          authorization_endpoint: `http://localhost:${this.port}/authorize`,
+          token_endpoint: `http://localhost:${this.port}/token`,
+          registration_endpoint: `http://localhost:${this.port}/register`,
+          response_types_supported: ['code'],
+          grant_types_supported: ['authorization_code'],
+          code_challenge_methods_supported: ['S256']
+        }));
+        return;
+      }
+
+      // OAuth 2.0 Dynamic Client Registration (RFC 7591)
+      // Accept registration but we don't actually need auth
+      if (req.url === '/register' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const registration = JSON.parse(body || '{}');
+            res.writeHead(201, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              client_id: 'unopim-mcp-client',
+              client_secret: 'not-required',
+              client_id_issued_at: Math.floor(Date.now() / 1000),
+              client_secret_expires_at: 0,
+              redirect_uris: registration.redirect_uris || [],
+              token_endpoint_auth_method: 'none',
+              grant_types: ['authorization_code'],
+              response_types: ['code'],
+              client_name: registration.client_name || 'MCP Client'
+            }));
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_request' }));
+          }
+        });
+        return;
+      }
+
+      // OAuth 2.0 Protected Resource Metadata (RFC 9728)
+      // Claude Desktop checks this endpoint to discover authentication requirements
+      if (req.url === '/.well-known/oauth-protected-resource' || 
+          req.url?.startsWith('/.well-known/oauth-protected-resource/')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          resource: `http://localhost:${this.port}`,
+          // No authorization servers = no auth required
+          bearer_methods_supported: ['header'],
+          resource_documentation: 'https://github.com/picopublish/unopim-mcp'
+        }));
+        return;
+      }
+
+      if (req.url === '/sse' && req.method === 'GET') {
+        console.log('📡 New SSE connection request');
+        const transport = new SSEServerTransport('/message', res);
+        const sessionId = transport.sessionId;
+        this.transports.set(sessionId, transport);
+        
+        // Clean up on disconnect
+        res.on('close', () => {
+          console.log(`📡 SSE connection closed: ${sessionId}`);
+          this.transports.delete(sessionId);
+        });
+        
+        await this.server.connect(transport);
+        console.log(`📡 SSE connection established: ${sessionId}`);
+        return;
+      }
+
+      if (req.url?.startsWith('/message') && req.method === 'POST') {
+        // Extract session ID from query string
+        const url = new URL(req.url, `http://localhost:${this.port}`);
+        const sessionId = url.searchParams.get('sessionId');
+        
+        if (!sessionId) {
+          console.error('❌ POST /message missing sessionId');
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing sessionId parameter' }));
+          return;
+        }
+        
+        const transport = this.transports.get(sessionId);
+        if (!transport) {
+          console.error(`❌ POST /message unknown session: ${sessionId}`);
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Session not found' }));
+          return;
+        }
+        
+        // Handle the message through the transport
+        await transport.handlePostMessage(req, res);
+        return;
+      }
+
+      // Also handle POST to /sse (some clients send it there)
+      if (req.url?.startsWith('/sse') && req.method === 'POST') {
+        const url = new URL(req.url, `http://localhost:${this.port}`);
+        const sessionId = url.searchParams.get('sessionId');
+        
+        if (sessionId) {
+          const transport = this.transports.get(sessionId);
+          if (transport) {
+            await transport.handlePostMessage(req, res);
+            return;
+          }
+        }
+        
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found' }));
+        return;
+      }
+
+      res.writeHead(404);
+      res.end('Not Found');
+    });
+  }
+
+  async start() {
+    return new Promise<void>((resolve) => {
+      this.httpServer.listen(this.port, () => {
+        console.log(`╔═══════════════════════════════════════════════════════════╗`);
+        console.log(`║                                                           ║`);
+        console.log(`║      UnoPim MCP Server (HTTP Mode) - RUNNING             ║`);
+        console.log(`║                                                           ║`);
+        console.log(`╚═══════════════════════════════════════════════════════════╝`);
+        console.log();
+        console.log(`🌐 Server listening on: http://localhost:${this.port}`);
+        console.log(`📡 SSE endpoint: http://localhost:${this.port}/sse`);
+        console.log(`💚 Health check: http://localhost:${this.port}/health`);
+        console.log();
+        console.log(`To expose via ngrok:`);
+        console.log(`  ngrok http ${this.port}`);
+        console.log();
+        resolve();
+      });
+    });
+  }
+}
+
+// ============================================================================
+// Start Server
+// ============================================================================
+
+const port = parseInt(process.env.PORT || '3000', 10);
+const server = new UnoPimHttpServer(port);
+
+server.start().catch((error) => {
+  console.error('Server error:', error);
+  process.exit(1);
+});
