@@ -45,13 +45,25 @@ ngrok http 3000
 
 ## 📋 Claude Desktop Configuration
 
-### Remote (HTTP/SSE) mode via ngrok ⭐ Recommended
+### Remote HTTP mode (Azure/Cloud) ⭐ Recommended
 
 ```json
 {
   "mcpServers": {
     "unopim": {
-      "url": "https://your-ngrok-url.ngrok-free.app/sse"
+      "url": "https://your-server.azurewebsites.net/mcp"
+    }
+  }
+}
+```
+
+### Remote SSE mode (alternative)
+
+```json
+{
+  "mcpServers": {
+    "unopim": {
+      "url": "https://your-server.azurewebsites.net/sse"
     }
   }
 }

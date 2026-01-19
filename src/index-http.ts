@@ -7,6 +7,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -14,6 +15,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import http from 'http';
+import crypto from 'crypto';
 
 import { loadConfig } from './config.js';
 import { OAuthManager } from './auth/oauth.js';
@@ -94,9 +96,12 @@ class UnoPimHttpServer {
   private httpServer!: http.Server;
   private port: number;
   private transports: Map<string, SSEServerTransport> = new Map();
+  private streamableTransports: Map<string, StreamableHTTPServerTransport> = new Map();
+  private apiKey: string | undefined;
 
   constructor(port: number = 3000) {
     this.port = port;
+    this.apiKey = process.env.MCP_API_KEY || process.env.UNOPIM_CLIENT_ID;
 
     // Load configuration
     const config = loadConfig();
@@ -1084,8 +1089,8 @@ NOTES:
     this.httpServer = http.createServer(async (req, res) => {
       // CORS headers
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
 
       if (req.method === 'OPTIONS') {
         res.writeHead(200);
@@ -1093,6 +1098,7 @@ NOTES:
         return;
       }
 
+      // Health endpoint - no auth required
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'healthy', version: '1.0.0' }));
@@ -1158,6 +1164,90 @@ NOTES:
         return;
       }
 
+      // Streamable HTTP endpoint (modern MCP transport) - with API key auth
+      if (req.url === '/mcp' && (req.method === 'POST' || req.method === 'GET' || req.method === 'DELETE')) {
+        // API Key validation for /mcp endpoint
+        if (this.apiKey) {
+          const authHeader = req.headers['authorization'];
+          const apiKeyHeader = req.headers['x-api-key'];
+          
+          let providedKey: string | undefined;
+          
+          // Check Authorization: Bearer <key> or Authorization: ApiKey <key>
+          if (authHeader) {
+            if (authHeader.startsWith('Bearer ')) {
+              providedKey = authHeader.slice(7);
+            } else if (authHeader.toLowerCase().startsWith('apikey ')) {
+              providedKey = authHeader.slice(7);
+            }
+          }
+          
+          // Check X-API-Key header
+          if (!providedKey && apiKeyHeader) {
+            providedKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+          }
+          
+          if (providedKey !== this.apiKey) {
+            console.log(`🔒 Auth failed on /mcp - provided: ${providedKey ? '***' + providedKey.slice(-4) : 'none'}`);
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              error: 'Unauthorized', 
+              message: 'Invalid or missing API key. Use Authorization: Bearer <key> or X-API-Key header.' 
+            }));
+            return;
+          }
+          console.log('🔓 Auth successful on /mcp');
+        }
+
+        console.log(`🔄 Streamable HTTP request: ${req.method} /mcp`);
+        try {
+          // Check for existing session
+          const sessionId = req.headers['mcp-session-id'] as string | undefined;
+          let transport: StreamableHTTPServerTransport;
+          
+          if (sessionId && this.streamableTransports.has(sessionId)) {
+            // Reuse existing transport for this session
+            transport = this.streamableTransports.get(sessionId)!;
+            console.log(`🔄 Reusing session: ${sessionId}`);
+          } else {
+            // Create new transport for new session
+            transport = new StreamableHTTPServerTransport({
+              sessionIdGenerator: () => crypto.randomUUID(),
+            });
+            
+            // Connect transport to server
+            await this.server.connect(transport);
+            
+            // Store transport for future requests (session will be set after first response)
+            transport.onclose = () => {
+              const sid = (transport as any).sessionId;
+              if (sid) {
+                this.streamableTransports.delete(sid);
+                console.log(`🔄 Session closed: ${sid}`);
+              }
+            };
+          }
+          
+          // Handle the request
+          await transport.handleRequest(req, res);
+          
+          // Store transport by session ID after handling (session ID is set in response)
+          const newSessionId = (transport as any).sessionId;
+          if (newSessionId && !this.streamableTransports.has(newSessionId)) {
+            this.streamableTransports.set(newSessionId, transport);
+            console.log(`🔄 New session created: ${newSessionId}`);
+          }
+        } catch (error) {
+          console.error('❌ Streamable HTTP error:', error);
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Internal server error' }));
+          }
+        }
+        return;
+      }
+
+      // SSE endpoint (legacy transport) - no auth required
       if (req.url === '/sse' && req.method === 'GET') {
         console.log('📡 New SSE connection request');
         const transport = new SSEServerTransport('/message', res);
@@ -1233,8 +1323,14 @@ NOTES:
         console.log(`╚═══════════════════════════════════════════════════════════╝`);
         console.log();
         console.log(`🌐 Server listening on: http://localhost:${this.port}`);
+        console.log(`🔄 Streamable HTTP: http://localhost:${this.port}/mcp`);
         console.log(`📡 SSE endpoint: http://localhost:${this.port}/sse`);
         console.log(`💚 Health check: http://localhost:${this.port}/health`);
+        if (this.apiKey) {
+          console.log(`🔐 API Key auth: ENABLED (use Authorization: Bearer <key> or X-API-Key header)`);
+        } else {
+          console.log(`🔓 API Key auth: DISABLED (set MCP_API_KEY to enable)`);
+        }
         console.log();
         console.log(`To expose via ngrok:`);
         console.log(`  ngrok http ${this.port}`);
