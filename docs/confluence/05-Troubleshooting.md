@@ -48,20 +48,20 @@ cat .env  # Check content is correct
 
 **Symptoms:**
 ```
-Error: connect ECONNREFUSED REDACTED-IP:8000
+Error: connect ECONNREFUSED your-instance.pim.dk
 ```
 
 **Solutions:**
 
 1. **Verify UnoPim is accessible:**
 ```bash
-curl http://REDACTED-IP:8000/api/v1/rest/locales
+curl http://your-instance.pim.dk/api/v1/rest/locales
 ```
 
 2. **Check base URL format:**
-- ✅ Correct: `http://REDACTED-IP:8000`
-- ❌ Wrong: `http://REDACTED-IP:8000/` (trailing slash)
-- ❌ Wrong: `http://REDACTED-IP:8000/api/v1/rest` (includes path)
+- ✅ Correct: `http://your-instance.pim.dk`
+- ❌ Wrong: `http://your-instance.pim.dk/` (trailing slash)
+- ❌ Wrong: `http://your-instance.pim.dk/api/v1/rest` (includes path)
 
 3. **Check firewall/network:**
 - Verify port 8000 is open
@@ -191,7 +191,7 @@ PASSWORD="password"
 
 CREDENTIALS=$(echo -n "$CLIENT_ID:$CLIENT_SECRET" | base64)
 
-curl -X POST http://REDACTED-IP:8000/oauth/token \
+curl -X POST http://your-instance.pim.dk/oauth/token \
   -H "Authorization: Basic $CREDENTIALS" \
   -H "Content-Type: application/json" \
   -d '{

@@ -102,6 +102,10 @@ export const UpsertProductInputSchema = z.object({
   values: ProductValuesSchema,
 });
 
+export const DeleteProductInputSchema = z.object({
+  sku: z.string(),
+});
+
 export type CreateProductInput = z.infer<typeof CreateProductInputSchema>;
 export type CreateConfigurableProductInput = z.infer<typeof CreateConfigurableProductInputSchema>;
 export type BulkCreateProductsInput = z.infer<typeof BulkCreateProductsInputSchema>;
@@ -109,6 +113,7 @@ export type GetProductsInput = z.infer<typeof GetProductsInputSchema>;
 export type GetProductInput = z.infer<typeof GetProductInputSchema>;
 export type UpdateProductInput = z.infer<typeof UpdateProductInputSchema>;
 export type UpsertProductInput = z.infer<typeof UpsertProductInputSchema>;
+export type DeleteProductInput = z.infer<typeof DeleteProductInputSchema>;
 
 // ============================================================================
 // Tool Implementations
@@ -555,6 +560,34 @@ export async function upsertProduct(
     }
   } catch (error) {
     throw new Error(`Failed to upsert product '${input.sku}': ${error}`);
+  }
+}
+
+/**
+ * unopim_delete_product
+ * Permanently deletes a product by SKU
+ */
+export async function deleteProduct(
+  client: UnoPimClient,
+  input: DeleteProductInput
+): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    await client.delete(`/api/v1/rest/products/${encodeURIComponent(input.sku)}`);
+    return {
+      success: true,
+      message: `Product '${input.sku}' deleted successfully`,
+    };
+  } catch (error) {
+    if (String(error).includes('404') || String(error).includes('not found')) {
+      return {
+        success: false,
+        message: `Product '${input.sku}' not found`,
+      };
+    }
+    throw new Error(`Failed to delete product '${input.sku}': ${error}`);
   }
 }
 

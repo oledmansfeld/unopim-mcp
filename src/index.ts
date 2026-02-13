@@ -64,6 +64,7 @@ import {
   getProduct,
   updateProduct,
   upsertProduct,
+  deleteProduct,
   uploadProductMedia,
   uploadCategoryMedia,
   CreateProductInputSchema,
@@ -73,6 +74,7 @@ import {
   GetProductInputSchema,
   UpdateProductInputSchema,
   UpsertProductInputSchema,
+  DeleteProductInputSchema,
   UploadProductMediaInputSchema,
   UploadCategoryMediaInputSchema,
 } from './tools/products.js';
@@ -572,6 +574,17 @@ TIP: Use unopim_get_attribute_options() to verify exact option codes before crea
           },
         },
         {
+          name: 'unopim_delete_product',
+          description: `Permanently delete a product by SKU. WARNING: This action is IRREVERSIBLE. The product and all its data will be permanently removed from UnoPim. Use with extreme caution. Always confirm with the user before deleting. For configurable products, delete variant products first, then the parent.`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The SKU of the product to delete' },
+            },
+            required: ['sku'],
+          },
+        },
+        {
           name: 'unopim_upload_product_media',
           description: `Upload an image or file to a product attribute AND automatically link it to the product.
 
@@ -805,6 +818,12 @@ NOTES:
           case 'unopim_upsert_product': {
             const input = UpsertProductInputSchema.parse(args);
             const result = await upsertProduct(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'unopim_delete_product': {
+            const input = DeleteProductInputSchema.parse(args);
+            const result = await deleteProduct(this.client, input);
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
 

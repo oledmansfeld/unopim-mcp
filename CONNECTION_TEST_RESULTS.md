@@ -1,7 +1,7 @@
 # UnoPim MCP Server - Connection Test Results
 
 **Date:** 2026-01-12
-**Instance:** http://REDACTED-IP:8000
+**Instance:** https://your-instance.pim.dk
 **Status:** ✅ **SUCCESSFUL**
 
 ## Test Summary
@@ -11,8 +11,8 @@ All connection tests passed successfully. The UnoPim MCP Server is fully operati
 ## Authentication Test
 
 ✅ **OAuth2 Password Grant Flow**
-- Client ID: `REDACTED-CLIENT-ID`
-- Username: `REDACTED-EMAIL`
+- Client ID: `your-client-id`
+- Username: `your-username@example.com`
 - Result: Token acquired successfully
 - Token expiry: 3600 seconds (1 hour)
 - Auto-refresh: Configured (5 min before expiry)
@@ -45,7 +45,7 @@ All connection tests passed successfully. The UnoPim MCP Server is fully operati
 
 | Setting | Value |
 |---------|-------|
-| Base URL | http://REDACTED-IP:8000 |
+| Base URL | https://your-instance.pim.dk |
 | Default Channel | default |
 | Available Locales | da_DK, en_US |
 | Default Currency | USD |
@@ -129,6 +129,6 @@ This file contains the complete, tested configuration ready for Claude Desktop.
 
 ## Conclusion
 
-The UnoPim MCP Server is **production-ready** and successfully connected to your UnoPim instance at http://REDACTED-IP:8000. All authentication, API endpoints, and tool implementations have been verified and are working correctly.
+The UnoPim MCP Server is **production-ready** and successfully connected to your UnoPim instance at https://your-instance.pim.dk. All authentication, API endpoints, and tool implementations have been verified and are working correctly.
 
 **Status: ✅ READY FOR USE**

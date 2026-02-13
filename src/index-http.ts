@@ -69,6 +69,7 @@ import {
   getProduct,
   updateProduct,
   upsertProduct,
+  deleteProduct,
   smartCreateProduct,
   getFamilySchema,
   uploadProductMedia,
@@ -80,6 +81,7 @@ import {
   GetProductInputSchema,
   UpdateProductInputSchema,
   UpsertProductInputSchema,
+  DeleteProductInputSchema,
   SmartCreateProductInputSchema,
   GetFamilySchemaInputSchema,
   UploadProductMediaInputSchema,
@@ -827,6 +829,17 @@ NOTES:
             required: ['code', 'category_field'],
           },
         },
+        {
+          name: 'unopim_delete_product',
+          description: `Permanently delete a product by SKU. WARNING: This action is IRREVERSIBLE. The product and all its data will be permanently removed from UnoPim. Use with extreme caution. Always confirm with the user before deleting. For configurable products, delete variant products first, then the parent.`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string', description: 'The SKU of the product to delete' },
+            },
+            required: ['sku'],
+          },
+        },
       ],
     }));
 
@@ -1030,6 +1043,11 @@ NOTES:
           case 'unopim_upload_category_media': {
             const input = UploadCategoryMediaInputSchema.parse(args);
             const result = await uploadCategoryMedia(this.client, input);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          case 'unopim_delete_product': {
+            const input = DeleteProductInputSchema.parse(args);
+            const result = await deleteProduct(this.client, input);
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
           default:

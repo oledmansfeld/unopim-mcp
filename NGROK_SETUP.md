@@ -41,7 +41,7 @@ ngrok config add-authtoken YOUR_AUTH_TOKEN
 ### Step 3: Build HTTP Version
 
 ```bash
-cd /home/odm/projects/unoMcp
+cd /path/to/unopim-mcp
 ./build.sh
 ```
 
@@ -50,11 +50,11 @@ cd /home/odm/projects/unoMcp
 Open a terminal and run:
 
 ```bash
-export UNOPIM_BASE_URL="http://REDACTED-IP:8000"
-export UNOPIM_CLIENT_ID="REDACTED-CLIENT-ID"
-export UNOPIM_CLIENT_SECRET="REDACTED-SECRET"
-export UNOPIM_USERNAME="REDACTED-EMAIL"
-export UNOPIM_PASSWORD="REDACTED-PASSWORD"
+export UNOPIM_BASE_URL="https://your-instance.pim.dk"
+export UNOPIM_CLIENT_ID="your-client-id"
+export UNOPIM_CLIENT_SECRET="your-client-secret"
+export UNOPIM_USERNAME="your-username@example.com"
+export UNOPIM_PASSWORD="your-password"
 export UNOPIM_DEFAULT_LOCALE="da_DK"
 export UNOPIM_DEFAULT_CURRENCY="DKK"
 export PORT=3000

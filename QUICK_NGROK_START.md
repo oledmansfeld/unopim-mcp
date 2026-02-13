@@ -5,7 +5,7 @@
 ### Step 1: Start the HTTP Server
 
 ```bash
-cd /home/odm/projects/unoMcp
+cd /path/to/unopim-mcp
 ./start-http.sh
 ```
 

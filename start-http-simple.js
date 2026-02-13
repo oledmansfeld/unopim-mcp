@@ -1,14 +1,16 @@
 /**
  * Simple Node.js wrapper to start HTTP server with environment variables
  * This works better in WSL/Windows environments
+ *
+ * Copy this file and fill in your credentials, or use a .env file instead.
  */
 
 // Set environment variables
-process.env.UNOPIM_BASE_URL = 'http://REDACTED-IP:8000';
-process.env.UNOPIM_CLIENT_ID = 'REDACTED-CLIENT-ID';
-process.env.UNOPIM_CLIENT_SECRET = 'REDACTED-SECRET';
-process.env.UNOPIM_USERNAME = 'REDACTED-EMAIL';
-process.env.UNOPIM_PASSWORD = 'REDACTED-PASSWORD';
+process.env.UNOPIM_BASE_URL = 'https://your-instance.pim.dk';
+process.env.UNOPIM_CLIENT_ID = 'your-client-id';
+process.env.UNOPIM_CLIENT_SECRET = 'your-client-secret';
+process.env.UNOPIM_USERNAME = 'your-username@example.com';
+process.env.UNOPIM_PASSWORD = 'your-password';
 process.env.UNOPIM_DEFAULT_LOCALE = 'da_DK';
 process.env.UNOPIM_DEFAULT_CURRENCY = 'DKK';
 process.env.PORT = process.env.PORT || '3000';

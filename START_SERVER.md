@@ -3,23 +3,23 @@
 ## ✅ EASIEST METHOD - Double-click the batch file
 
 **Windows Users:**
-1. Navigate to: `C:\Users\Ole\`
+1. Navigate to: `C:\Users\YourUser\`
 2. Double-click: `start-unopim-wsl.bat`
 3. Server will start automatically
 
-The batch file is at: `C:\Users\Ole\start-unopim-wsl.bat`
+The batch file is at: `C:\Users\YourUser\start-unopim-wsl.bat`
 
 ## Alternative: Command Line
 
 ### From Windows Command Prompt:
 ```cmd
-cd C:\Users\Ole
+cd C:\Users\YourUser
 start-unopim-wsl.bat
 ```
 
 ### From WSL Terminal:
 ```bash
-cd /home/odm/projects/unoMcp
+cd /path/to/unopim-mcp
 ./start-http.sh
 ```
 

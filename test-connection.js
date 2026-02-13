@@ -4,11 +4,11 @@
 
 // Configuration from environment
 const config = {
-  baseUrl: process.env.UNOPIM_BASE_URL || 'http://REDACTED-IP:8000',
-  clientId: process.env.UNOPIM_CLIENT_ID || 'REDACTED-CLIENT-ID',
-  clientSecret: process.env.UNOPIM_CLIENT_SECRET || 'REDACTED-SECRET',
-  username: process.env.UNOPIM_USERNAME || 'REDACTED-EMAIL',
-  password: process.env.UNOPIM_PASSWORD || 'REDACTED-PASSWORD',
+  baseUrl: process.env.UNOPIM_BASE_URL || 'https://your-instance.pim.dk',
+  clientId: process.env.UNOPIM_CLIENT_ID || 'your-client-id',
+  clientSecret: process.env.UNOPIM_CLIENT_SECRET || 'your-client-secret',
+  username: process.env.UNOPIM_USERNAME || 'your-username@example.com',
+  password: process.env.UNOPIM_PASSWORD || 'your-password',
 };
 
 console.log('═══════════════════════════════════════════════════════');

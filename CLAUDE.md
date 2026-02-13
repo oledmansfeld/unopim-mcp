@@ -143,6 +143,7 @@ The server exposes 24 tools organized into 6 categories:
 - `unopim_upsert_product` - Create or update product (checks if SKU exists)
 - `unopim_create_configurable_product` - Create configurable product with variants
 - `unopim_bulk_create_products` - Batch create products with error handling
+- `unopim_delete_product` - Permanently delete a product by SKU (IRREVERSIBLE! For configurable products, delete variants first, then parent)
 
 ### Media Upload Tools ⭐ AUTOMATIC LINKING
 - `unopim_upload_product_media` - Upload image/file to product AND automatically link it
@@ -208,6 +209,8 @@ LEVEL 8: Media (LAST - after products exist)
 4. **Using attribute option values that don't exist** → WILL FAIL
 5. **Uploading media to non-existent product** → WILL FAIL
 6. **Using wrong case for option values** → WILL FAIL (see below!)
+7. **Deleting a configurable parent before its variants** → Variants become orphaned! Delete variants FIRST, then parent
+8. **Deleting without user confirmation** → Deletion is IRREVERSIBLE, always confirm with the user first
 
 ### 🔴 CRITICAL: OPTION CODES MUST BE LOWERCASE
 
@@ -432,6 +435,8 @@ When user asks to import products, follow this EXACT sequence:
 ❌ NEVER assume attributes/options exist - always verify
 ❌ NEVER upload media before product is created
 ❌ NEVER use option values that don't exist (case sensitive!)
+❌ NEVER delete products without explicit user confirmation (irreversible!)
+❌ NEVER delete a configurable parent before deleting its variants
 ```
 
 ## 💡 Tips for Success

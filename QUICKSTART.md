@@ -13,7 +13,7 @@ Get the UnoPim MCP Server up and running in 5 minutes.
 The server is already built and ready to use!
 
 ```bash
-cd /home/odm/projects/unoMcp
+cd /path/to/unopim-mcp
 ./build.sh  # Rebuild if needed
 ```
 
@@ -25,10 +25,10 @@ For quick testing, export your credentials:
 
 ```bash
 export UNOPIM_BASE_URL="https://your-instance.pim.dk"
-export UNOPIM_CLIENT_ID="REDACTED-CLIENT-ID"
-export UNOPIM_CLIENT_SECRET="REDACTED-SECRET"
-export UNOPIM_USERNAME="REDACTED-EMAIL"
-export UNOPIM_PASSWORD="REDACTED-PASSWORD"
+export UNOPIM_CLIENT_ID="your-client-id"
+export UNOPIM_CLIENT_SECRET="your-client-secret"
+export UNOPIM_USERNAME="your-username@example.com"
+export UNOPIM_PASSWORD="your-password"
 export UNOPIM_DEFAULT_LOCALE="da_DK"
 export UNOPIM_DEFAULT_CURRENCY="DKK"
 
@@ -50,13 +50,13 @@ Add this configuration:
   "mcpServers": {
     "unopim": {
       "command": "node",
-      "args": ["/home/odm/projects/unoMcp/dist/index.js"],
+      "args": ["/path/to/unopim-mcp/dist/index.js"],
       "env": {
         "UNOPIM_BASE_URL": "https://your-instance.pim.dk",
-        "UNOPIM_CLIENT_ID": "REDACTED-CLIENT-ID",
-        "UNOPIM_CLIENT_SECRET": "REDACTED-SECRET",
-        "UNOPIM_USERNAME": "REDACTED-EMAIL",
-        "UNOPIM_PASSWORD": "REDACTED-PASSWORD",
+        "UNOPIM_CLIENT_ID": "your-client-id",
+        "UNOPIM_CLIENT_SECRET": "your-client-secret",
+        "UNOPIM_USERNAME": "your-username@example.com",
+        "UNOPIM_PASSWORD": "your-password",
         "UNOPIM_DEFAULT_LOCALE": "da_DK",
         "UNOPIM_DEFAULT_CURRENCY": "DKK"
       }

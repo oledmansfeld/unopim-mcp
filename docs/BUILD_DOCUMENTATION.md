@@ -61,7 +61,7 @@ The **UnoPim MCP Server** is a Model Context Protocol (MCP) server that acts as 
                              ▼
               ┌─────────────────────────────┐
               │         UnoPim PIM          │
-              │    http://REDACTED-IP     │
+              │  https://your-instance.pim  │
               └─────────────────────────────┘
 ```
 
@@ -162,7 +162,7 @@ az webapp config appsettings set \
   --name app-unopim-mcp-dev-weu-001 \
   --settings \
     WEBSITES_PORT=3000 \
-    UNOPIM_BASE_URL="http://REDACTED-IP:8000" \
+    UNOPIM_BASE_URL="https://your-instance.pim.dk" \
     UNOPIM_CLIENT_ID="your-client-id" \
     UNOPIM_CLIENT_SECRET="your-client-secret" \
     UNOPIM_USERNAME="your-username" \
@@ -207,18 +207,18 @@ az webapp restart --name app-unopim-mcp-dev-weu-001 \
 
 ### API Key Authentication (for `/mcp` endpoint)
 
-**API Key:** `REDACTED-CLIENT-ID`
+**API Key:** Set via `MCP_API_KEY` or defaults to `UNOPIM_CLIENT_ID` environment variable.
 
 **Supported Headers:**
 
 ```http
-Authorization: Bearer REDACTED-CLIENT-ID
+Authorization: Bearer <your-api-key>
 ```
 
 or
 
 ```http
-X-API-Key: REDACTED-CLIENT-ID
+X-API-Key: <your-api-key>
 ```
 
 ### Testing Authentication
@@ -232,7 +232,7 @@ curl -s -X POST \
 # With API key (should pass)
 curl -s -X POST \
   -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer REDACTED-CLIENT-ID" \
+  -H "Authorization: Bearer <your-api-key>" \
   https://app-unopim-mcp-dev-weu-001.azurewebsites.net/mcp
 ```
 
@@ -255,14 +255,14 @@ curl -s -X POST \
 | `PORT` | ❌ | Server port (default: `3000`) |
 | `MCP_API_KEY` | ❌ | Override API key (defaults to CLIENT_ID) |
 
-### Current Production Configuration
+### Configuration Template
 
 ```bash
-UNOPIM_BASE_URL=http://REDACTED-IP:8000
-UNOPIM_CLIENT_ID=REDACTED-CLIENT-ID
-UNOPIM_CLIENT_SECRET=REDACTED-SECRET
-UNOPIM_USERNAME=REDACTED-EMAIL
-UNOPIM_PASSWORD=REDACTED-PASSWORD
+UNOPIM_BASE_URL=https://your-instance.pim.dk
+UNOPIM_CLIENT_ID=your-client-id
+UNOPIM_CLIENT_SECRET=your-client-secret
+UNOPIM_USERNAME=your-username@example.com
+UNOPIM_PASSWORD=your-password
 UNOPIM_DEFAULT_LOCALE=da_DK
 UNOPIM_DEFAULT_CURRENCY=DKK
 ```
@@ -301,7 +301,7 @@ Or for the authenticated endpoint:
 
 1. **Endpoint URL:** `https://app-unopim-mcp-dev-weu-001.azurewebsites.net/mcp`
 2. **Authentication Type:** API Key
-3. **Header:** `Authorization: Bearer REDACTED-CLIENT-ID`
+3. **Header:** `Authorization: Bearer <your-api-key>`
 
 ### MCP Protocol Flow
 

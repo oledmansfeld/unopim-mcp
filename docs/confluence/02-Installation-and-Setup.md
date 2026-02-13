@@ -11,7 +11,7 @@
 ### UnoPim Requirements
 - **API Access**: OAuth2 credentials (Client ID, Client Secret)
 - **User Account**: UnoPim user with appropriate permissions
-- **Base URL**: UnoPim instance URL (e.g., `http://REDACTED-IP:8000`)
+- **Base URL**: UnoPim instance URL (e.g., `http://your-instance.pim.dk`)
 
 ### Optional Tools
 - **ngrok**: For remote access via Claude Desktop (recommended)
@@ -60,11 +60,11 @@ Edit `.env` with your credentials:
 
 ```env
 # UnoPim API Configuration
-UNOPIM_BASE_URL=http://REDACTED-IP:8000
-UNOPIM_CLIENT_ID=REDACTED-CLIENT-ID
-UNOPIM_CLIENT_SECRET=REDACTED-SECRET
-UNOPIM_USERNAME=REDACTED-EMAIL
-UNOPIM_PASSWORD=REDACTED-PASSWORD
+UNOPIM_BASE_URL=https://your-instance.pim.dk
+UNOPIM_CLIENT_ID=your-client-id
+UNOPIM_CLIENT_SECRET=your-client-secret
+UNOPIM_USERNAME=your-username@example.com
+UNOPIM_PASSWORD=your-password
 
 # Optional Configuration
 UNOPIM_DEFAULT_LOCALE=da_DK
@@ -82,11 +82,11 @@ echo ".env" >> .gitignore
 For production, export variables in your shell:
 
 ```bash
-export UNOPIM_BASE_URL="http://REDACTED-IP:8000"
-export UNOPIM_CLIENT_ID="REDACTED-CLIENT-ID"
-export UNOPIM_CLIENT_SECRET="REDACTED-SECRET"
-export UNOPIM_USERNAME="REDACTED-EMAIL"
-export UNOPIM_PASSWORD="REDACTED-PASSWORD"
+export UNOPIM_BASE_URL="https://your-instance.pim.dk"
+export UNOPIM_CLIENT_ID="your-client-id"
+export UNOPIM_CLIENT_SECRET="your-client-secret"
+export UNOPIM_USERNAME="your-username@example.com"
+export UNOPIM_PASSWORD="your-password"
 export UNOPIM_DEFAULT_LOCALE="da_DK"
 export UNOPIM_DEFAULT_CHANNEL="default"
 export UNOPIM_DEFAULT_CURRENCY="USD"
@@ -105,13 +105,13 @@ Edit your Claude Desktop config file:
   "mcpServers": {
     "unopim": {
       "command": "node",
-      "args": ["/home/odm/AI-projects/unopim-mcp/dist/index.js"],
+      "args": ["/path/to/unopim-mcp/dist/index.js"],
       "env": {
-        "UNOPIM_BASE_URL": "http://REDACTED-IP:8000",
-        "UNOPIM_CLIENT_ID": "REDACTED-CLIENT-ID",
-        "UNOPIM_CLIENT_SECRET": "REDACTED-SECRET",
-        "UNOPIM_USERNAME": "REDACTED-EMAIL",
-        "UNOPIM_PASSWORD": "REDACTED-PASSWORD",
+        "UNOPIM_BASE_URL": "https://your-instance.pim.dk",
+        "UNOPIM_CLIENT_ID": "your-client-id",
+        "UNOPIM_CLIENT_SECRET": "your-client-secret",
+        "UNOPIM_USERNAME": "your-username@example.com",
+        "UNOPIM_PASSWORD": "your-password",
         "UNOPIM_DEFAULT_LOCALE": "da_DK",
         "UNOPIM_DEFAULT_CHANNEL": "default",
         "UNOPIM_DEFAULT_CURRENCY": "USD"
@@ -155,7 +155,7 @@ You should see:
 ```
 Loading environment from .env...
 Starting UnoPim MCP HTTP server on port 3000...
-Base URL: http://REDACTED-IP:8000
+Base URL: http://your-instance.pim.dk
 Locale: da_DK
 
 Ready for ngrok connection!
@@ -258,7 +258,7 @@ export $(cat .env | grep -v '^#' | xargs)
 
 **Solution:** Check base URL is accessible:
 ```bash
-curl http://REDACTED-IP:8000/api/v1/rest/locales
+curl http://your-instance.pim.dk/api/v1/rest/locales
 ```
 
 ### Issue: "Claude Desktop not seeing tools"
